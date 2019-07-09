@@ -146,11 +146,33 @@ comorbidity <- function(x, id, code, score, icd = "icd10", assign0, factorise = 
   ### Tidy codes if required
   if (tidy.codes) x <- .tidy(x = x, code = code)
 
-  ### Split by ID
-  x <- utils::unstack(x, form = stats::as.formula(paste(code, id, sep = "~")))
-
-  ### Run scoring algorithm
-  x <- .score(x, id = id, score = score, icd = icd, parallel = parallel, mc.cores = mc.cores)
+  ### Create data.table
+  data.table::setDT(x, key = id)
+  vars <- c(id, code)
+  x <- unique(x[, ..vars])
+  
+  ### Create data.table with all codes used and associated comorbidities 
+  regex    <- lofregex[[score]][[icd]]
+  lofcodes <- sapply(regex, grep, unique(x[[code]]), value = TRUE)
+  dt_codes <- data.table::melt(lofcodes, value.name = code)
+  
+  ### Replace codes with comorbidities
+  x <- merge(x, dt_codes, all.x = TRUE, allow.cartesian = TRUE, by = code)
+  x <- unique(x[, (code) := NULL])
+  x[, value := 1L]
+  
+  ### Reshape wide
+  dcast_f <- stats::as.formula(paste0(id, "~L1"))
+  x <- data.table::dcast(x, dcast_f, fun.aggregate = length, fill = 0)
+  
+  ### Tidy and return to data.frame
+  x[, `NA` := NULL]
+  setcolorder(x, c(id, names(regex)))
+  set(x, j=id, value=as.character(x[[id]]))
+  for (i in names(regex)) {
+    set(x, j = i, value = as.numeric(x[[i]]))
+  }
+  data.table::setDF(x)
 
   ### Compute Charlson score and Charlson index
   if (score == "charlson") {
